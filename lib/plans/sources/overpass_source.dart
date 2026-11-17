@@ -74,7 +74,7 @@ class OverpassRouteSource implements RouteSource {
     }
 
     throw StateError(
-      'Overpass ${label}: tiempo agotado o mirrors no disponibles'
+      'Overpass rutas: tiempo agotado o mirrors no disponibles'
       '${lastError == null ? '' : ' ($lastError)'}',
     );
   }
@@ -154,7 +154,7 @@ class OverpassRouteSource implements RouteSource {
       });
       return routes;
     } catch (error) {
-      throw StateError('Error consultando Overpass (${label}): $error');
+      throw StateError('Error consultando Overpass (rutas): $error');
     }
   }
 
