@@ -7,9 +7,9 @@ import 'data_source.dart';
 
 /// Fuente de rutas de senderismo reales vía Overpass API (OpenStreetMap).
 ///
-/// Solo devuelve relaciones `route=hiking|foot` existentes, con enlace
-/// verificable a openstreetmap.org. Sin API key. Si no hay red o no hay
-/// resultados, devuelve lista vacía (el DiscoveryEngine hace fallback).
+/// Solo devuelve relaciones de rutas existentes, con enlace verificable a
+/// openstreetmap.org. Sin API key. Los errores de red se propagan para que
+/// DiscoveryEngine los registre; una respuesta vacía sigue siendo válida.
 class OverpassRouteSource implements RouteSource {
   final double lat;
   final double lng;
