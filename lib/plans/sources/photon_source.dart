@@ -11,8 +11,8 @@ import 'data_source.dart';
 /// Por qué existe: Overpass falla a menudo desde móvil (timeouts, 406 del
 /// mirror principal). Photon responde en <1s con bares, restaurantes,
 /// museos, castillos o miradores por palabra clave + cercanía, con
-/// coordenadas y pueblo incluidos. Si falla, devuelve lista vacía y el
-/// llamador sigue con las demás fuentes. Nunca lanza.
+/// coordenadas y pueblo incluidos. Cada consulta se aísla; si todas fallan,
+/// el error se propaga para que DiscoveryEngine lo registre.
 class PhotonPlaceSource implements PlaceSource {
   final double lat;
   final double lng;
