@@ -8,7 +8,8 @@ import 'data_source.dart';
 /// Usa motores de búsqueda públicos y RSS para encontrar ferias, romerías,
 /// conciertos, mercados y eventos culturales cerca de [lat]/[lng].
 /// Cada resultado se convierte en un [Candidate] de tipo `event`.
-/// Si falla la red o no hay resultados, devuelve lista vacía. Nunca lanza.
+/// Si falla la red, las consultas fallidas se aíslan; si fallan todas, el
+/// error se propaga para que DiscoveryEngine lo registre.
 class NewsEventsSource implements PlaceSource {
   final double lat;
   final double lng;
