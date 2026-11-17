@@ -10,8 +10,8 @@ import 'data_source.dart';
 /// Komoot es la plataforma de rutas más popular en Europa: tiene
 /// senderismo, BTT, ciclismo y trail running. Su API pública de
 /// búsqueda devuelve rutas con distancia, duración, dificultad,
-/// elevación y enlace verificable. Si falla, devuelve lista vacía.
-/// Nunca lanza.
+/// elevación y enlace verificable. Si falla la consulta, el error se
+/// propaga para que DiscoveryEngine lo registre.
 class KomootRouteSource implements RouteSource {
   final double lat;
   final double lng;
