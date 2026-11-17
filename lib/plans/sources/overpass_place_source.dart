@@ -173,7 +173,7 @@ class OverpassPlaceSource implements PlaceSource {
     }
 
     throw StateError(
-      'Overpass ${label}: tiempo agotado o mirrors no disponibles'
+      'Overpass lugares: tiempo agotado o mirrors no disponibles'
       '${lastError == null ? '' : ' ($lastError)'}',
     );
   }
@@ -240,7 +240,7 @@ class OverpassPlaceSource implements PlaceSource {
       }
       return places;
     } catch (error) {
-      throw StateError('Error consultando Overpass (${label}): $error');
+      throw StateError('Error consultando Overpass (lugares): $error');
     }
   }
 
