@@ -15,8 +15,8 @@ import 'data_source.dart';
 /// - aventura/deporte/running -> pitch, sports_centre, climbing
 /// - cine/teatro -> cinema, theatre
 ///
-/// Si no hay red o no hay resultados, devuelve lista vacía y el
-/// DiscoveryEngine hace fallback a curados/mocks. Nunca lanza.
+/// Si no hay resultados devuelve una lista vacía. Los errores de red o
+/// respuesta se propagan para que DiscoveryEngine los registre.
 class OverpassPlaceSource implements PlaceSource {
   final double lat;
   final double lng;
