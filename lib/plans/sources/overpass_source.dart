@@ -7,9 +7,9 @@ import 'data_source.dart';
 
 /// Fuente de rutas de senderismo reales vía Overpass API (OpenStreetMap).
 ///
-/// Solo devuelve relaciones `route=hiking|foot` existentes, con enlace
-/// verificable a openstreetmap.org. Sin API key. Si no hay red o no hay
-/// resultados, devuelve lista vacía (el DiscoveryEngine hace fallback).
+/// Solo devuelve relaciones de rutas existentes, con enlace verificable a
+/// openstreetmap.org. Sin API key. Los errores de red se propagan para que
+/// DiscoveryEngine los registre; una respuesta vacía sigue siendo válida.
 class OverpassRouteSource implements RouteSource {
   final double lat;
   final double lng;
@@ -45,24 +45,38 @@ class OverpassRouteSource implements RouteSource {
   }
 
   Future<http.Response> _post(String query) async {
-    Exception? last;
-    for (final ep in _endpoints) {
+    final clock = Stopwatch()..start();
+    final perEndpointBudget =
+        Duration(microseconds: timeout.inMicroseconds ~/ _endpoints.length);
+    Object? lastError;
+
+    for (final endpoint in _endpoints) {
+      final remaining = timeout - clock.elapsed;
+      if (remaining.inMicroseconds <= 0) break;
+      final attemptTimeout = remaining.compareTo(perEndpointBudget) < 0
+          ? remaining
+          : perEndpointBudget;
       try {
-        final res = await _client
+        final response = await _client
             .post(
-              Uri.parse(ep),
-              headers: {
+              Uri.parse(endpoint),
+              headers: const {
                 'Content-Type': 'application/x-www-form-urlencoded',
               },
               body: {'data': query},
             )
-            .timeout(timeout);
-        if (res.statusCode == 200) return res;
-      } catch (e) {
-        last = e is Exception ? e : Exception('$e');
+            .timeout(attemptTimeout);
+        if (response.statusCode == 200) return response;
+        lastError = StateError('HTTP ${response.statusCode} en $endpoint');
+      } catch (error) {
+        lastError = error;
       }
     }
-    throw last ?? Exception('overpass sin respuesta');
+
+    throw StateError(
+      'Overpass rutas: tiempo agotado o mirrors no disponibles'
+      '${lastError == null ? '' : ' ($lastError)'}',
+    );
   }
 
   @override
@@ -70,9 +84,13 @@ class OverpassRouteSource implements RouteSource {
     try {
       final res = await _post(_buildQuery());
       final decoded = jsonDecode(res.body);
-      if (decoded is! Map<String, dynamic>) return const [];
+      if (decoded is! Map<String, dynamic>) {
+        throw const FormatException('Respuesta JSON de Overpass no válida');
+      }
       final elements = decoded['elements'];
-      if (elements is! List) return const [];
+      if (elements is! List) {
+        throw const FormatException('Overpass no devolvió una lista de elementos');
+      }
       final routes = <PlanRoute>[];
       final seenNames = <String>{};
       for (final el in elements) {
@@ -135,8 +153,8 @@ class OverpassRouteSource implements RouteSource {
         return da.compareTo(db);
       });
       return routes;
-    } catch (_) {
-      return const [];
+    } catch (error) {
+      throw StateError('Error consultando Overpass (rutas): $error');
     }
   }
 

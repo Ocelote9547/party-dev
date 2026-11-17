@@ -8,7 +8,8 @@ import 'data_source.dart';
 /// Usa motores de búsqueda públicos y RSS para encontrar ferias, romerías,
 /// conciertos, mercados y eventos culturales cerca de [lat]/[lng].
 /// Cada resultado se convierte en un [Candidate] de tipo `event`.
-/// Si falla la red o no hay resultados, devuelve lista vacía. Nunca lanza.
+/// Si falla la red, las consultas fallidas se aíslan; si fallan todas, el
+/// error se propaga para que DiscoveryEngine lo registre.
 class NewsEventsSource implements PlaceSource {
   final double lat;
   final double lng;
@@ -29,29 +30,37 @@ class NewsEventsSource implements PlaceSource {
   @override
   Future<List<Place>> fetchAll() async {
     try {
-      // Queries de eventos típicos en pueblos y ciudades.
       final queries = [
         'feria romeria eventos $_townName',
         'eventos culturales $_townName',
         'discoteca fiesta halloween $_townName',
         'eventos hoy manana $_townName',
       ];
-
+      final results = await Future.wait([
+        for (final query in queries) _safeSearchWeb(query),
+      ]);
+      final failures = results.where((result) => result.$2 != null).toList();
+      if (failures.length == results.length && failures.isNotEmpty) {
+        throw StateError('Todas las consultas de eventos fallaron: ${failures.first.$2}');
+      }
       final places = <Place>[];
       final seen = <String>{};
-
-      final results = await Future.wait([
-        for (final q in queries) _searchWeb(q),
-      ]);
-      for (final found in results) {
-        for (final p in found) {
-          if (seen.add(p.title.toLowerCase())) places.add(p);
+      for (final result in results) {
+        for (final place in result.$1) {
+          if (seen.add(place.title.toLowerCase())) places.add(place);
         }
       }
-
       return places;
-    } catch (_) {
-      return const [];
+    } catch (error) {
+      throw StateError('Error consultando eventos web: $error');
+    }
+  }
+
+  Future<(List<Place>, Object?)> _safeSearchWeb(String query) async {
+    try {
+      return (await _searchWeb(query), null);
+    } catch (error) {
+      return (<Place>[], error);
     }
   }
 
@@ -67,10 +76,12 @@ class NewsEventsSource implements PlaceSource {
             '(KHTML, like Gecko) Chrome/120.0 Safari/537.36',
         'Accept': 'text/html',
       }).timeout(timeout);
-      if (res.statusCode != 200) return const [];
+      if (res.statusCode != 200) {
+        throw StateError('DuckDuckGo HTTP ${res.statusCode}');
+      }
       return _parseDuckDuckGo(res.body);
     } catch (_) {
-      return const [];
+      rethrow;
     }
   }
 

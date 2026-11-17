@@ -17,8 +17,6 @@ import 'services/saved_plans_service.dart';
 import 'services/weather_service.dart';
 import 'sources/curated_routes.dart';
 import 'sources/komoot_source.dart';
-import 'sources/local_fallback_source.dart';
-import 'sources/news_events_source.dart';
 import 'sources/overpass_place_source.dart';
 import 'sources/overpass_source.dart';
 import 'sources/photon_source.dart';
@@ -479,8 +477,8 @@ class _PlanCreatorV2ScreenState extends State<PlanCreatorV2Screen> {
       budgetMinPerPerson: budgetRange.minPerPerson,
       budgetMaxPerPerson: budgetRange.maxPerPerson,
       locationLabel: _placeController.text.trim(),
-      lat: _lat,
-      lng: _lng,
+      lat: _hasUsableCoordinates(_lat, _lng) ? _lat : null,
+      lng: _hasUsableCoordinates(_lat, _lng) ? _lng : null,
       moveMode: moveMode,
       timeOfDay: timeOfDay,
       planDate: _planDate,
@@ -559,12 +557,22 @@ class _PlanCreatorV2ScreenState extends State<PlanCreatorV2Screen> {
   bool _pickerCancelled = false;
   String? _lastSearchLabel;
 
+  static bool _hasUsableCoordinates(double? lat, double? lng) {
+    if (lat == null || lng == null || !lat.isFinite || !lng.isFinite) {
+      return false;
+    }
+    if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return false;
+    // 0,0 es el valor histórico usado cuando no había GPS; nunca se trata
+    // como una ubicación del usuario.
+    return lat != 0 || lng != 0;
+  }
+
   /// Resuelve coordenadas reales: GPS o sugerencia elegida si la hay; si no,
   /// geocodifica el texto. Si el texto es ambiguo (varios pueblos distintos),
   /// pregunta cuál (antes cogía el 1º por importancia y te mandaba a Córdoba).
   Future<({double lat, double lng, String label})?> _resolveCoords(
       String placeText) async {
-    if (_lat != null && _lng != null) {
+    if (_hasUsableCoordinates(_lat, _lng)) {
       return (
         lat: _lat!,
         lng: _lng!,
@@ -722,8 +730,9 @@ class _PlanCreatorV2ScreenState extends State<PlanCreatorV2Screen> {
         setState(() => _loading = false);
         return;
       }
-      final hasGeo = resolved != null;
-      _lastSearchLabel = hasGeo ? resolved.label : placeText;
+      final hasGeo = resolved != null &&
+          _hasUsableCoordinates(resolved!.lat, resolved!.lng);
+      _lastSearchLabel = hasGeo ? resolved!.label : placeText;
       double? maxDistance;
 
       // ---- Tiempo previsto y pronóstico ----
@@ -744,9 +753,9 @@ class _PlanCreatorV2ScreenState extends State<PlanCreatorV2Screen> {
         _weatherLoading = true;
       }
       WeatherHour? weather;
-      if (hasGeo && _lat != null && _lng != null) {
+      if (hasGeo) {
         try {
-          weather = await _weather.at(_lat!, _lng!, plannedStart)
+          weather = await _weather.at(resolved!.lat, resolved!.lng, plannedStart)
               .timeout(const Duration(seconds: 5));
         } catch (_) {
           weather = null;
@@ -772,22 +781,22 @@ class _PlanCreatorV2ScreenState extends State<PlanCreatorV2Screen> {
           timeSlot: intent.timeSlot,
           budgetMinPerPerson: intent.budgetMinPerPerson,
           budgetMaxPerPerson: intent.budgetMaxPerPerson,
-          locationLabel: resolved.label,
-          lat: resolved.lat,
-          lng: resolved.lng,
+          locationLabel: resolved!.label,
+          lat: resolved!.lat,
+          lng: resolved!.lng,
           moveMode: intent.moveMode,
           timeOfDay: intent.timeOfDay,
           planDate: intent.planDate,
         );
         if (mounted) {
           setState(() {
-            _geoLabel = resolved.label;
-            _stage = 'Buscando sitios reales cerca de ${resolved.label}…';
+            _geoLabel = resolved!.label;
+            _stage = 'Buscando sitios reales cerca de ${resolved!.label}…';
           });
         }
       } else {
         if (mounted) {
-          setState(() => _stage = 'Sin ubicación exacta: usando ideas generales…');
+          setState(() => _stage = 'Sin ubicación verificada: búsqueda geográfica desactivada…');
         }
       }
 
@@ -795,13 +804,9 @@ class _PlanCreatorV2ScreenState extends State<PlanCreatorV2Screen> {
       await Future<void>.delayed(const Duration(milliseconds: 350));
       if (!mounted) return;
 
-      // Fase 2: fuentes REALES según appetites + radio por transporte.
-      // Nada de mocks de Madrid mezclados: si tienes ubicación, todo es
-      // de tu zona; Madrid solo aparece como ÚLTIMO recurso sin red.
+      // Fase 2: descubrimiento coordinado por DiscoveryEngine.
+      // Ninguna fuente sintética participa en una búsqueda geolocalizada.
       DiscoveryResult discovered;
-      // Radio de búsqueda: el elegido por ti (10-200 km) o auto por
-      // transporte. Overpass se capa a 50 km (más es muy lento);
-      // Photon no tiene límite de servidor y cubre lo lejos.
       final searchRadius = _maxKm ?? _radiusFor(intent.moveMode);
       if (hasGeo) {
         final appetites =
@@ -809,197 +814,127 @@ class _PlanCreatorV2ScreenState extends State<PlanCreatorV2Screen> {
         final overpassRadius =
             searchRadius > 50 ? 50.0 : searchRadius;
         if (mounted) {
-          setState(() => _stage = 'Consultando mapas (sitios + rutas)…');
+          setState(() => _stage = 'Consultando mapas y fuentes reales…');
         }
-        // 5 fuentes reales en paralelo: Overpass (lugares+rutas), Photon
-        // (bares/ocio), Wikipedia (castillos, lagunas), NewsEvents (ferias,
-        // fiestas, eventos de internet) y LocalFallback (ideas reales de
-        // tu pueblo si no hay datos OSM).
-        // Cada una falla en silencio si no hay red.
-        final first = await Future.wait([
-          OverpassPlaceSource(
-            lat: resolved.lat,
-            lng: resolved.lng,
-            appetites: appetites,
-            radiusKm: overpassRadius,
-          ).fetchAll(),
-          OverpassRouteSource(
-            lat: resolved.lat,
-            lng: resolved.lng,
-            radiusKm: overpassRadius + 15,
-          ).fetchAll(),
-          PhotonPlaceSource(
-            lat: resolved.lat,
-            lng: resolved.lng,
-            queries: _photonQueriesFor(appetites),
-            radiusKm: searchRadius > 200 ? 200.0 : searchRadius,
-          ).fetchAll(),
-          WikipediaPlaceSource(
-            lat: resolved.lat,
-            lng: resolved.lng,
-            radiusKm: searchRadius > 10 ? 10 : searchRadius,
-          ).fetchAll(),
-          NewsEventsSource(
-            lat: resolved.lat,
-            lng: resolved.lng,
-            radiusKm: searchRadius,
-            locationLabel: resolved.label,
-          ).fetchAll(),
-          // Komoot: rutas reales de senderismo y BTT.
-          KomootRouteSource(
-            lat: resolved.lat,
-            lng: resolved.lng,
-            radiusKm: searchRadius > 50 ? 50.0 : searchRadius,
-            sport: 'hike',
-          ).fetchAll(),
-        ]).timeout(const Duration(seconds: 15));
-        final overpassPlaces = first[0] as List<Place>;
-        final realRoutes = first[1] as List<PlanRoute>;
-        final photonPlaces = first[2] as List<Place>;
-        final wikiPlaces = first[3] as List<Place>;
-        final newsPlaces = first[4] as List<Place>;
-        final komootRoutes = first[5] as List<PlanRoute>;
-        var realPlaces =
-            _mergePlaces([overpassPlaces, wikiPlaces, photonPlaces, newsPlaces]);
-        // Rutas: Overpass + Komoot (sin duplicados por nombre).
-        final allRoutes = _mergeRoutes([realRoutes, komootRoutes]);
-        // Pueblo con pocos datos: reintento Overpass amplio (35 km).
-        if (realPlaces.length < 5 && searchRadius <= 35) {
+
+        final engine = DiscoveryEngine.fromSources(
+          placeSources: [
+            OverpassPlaceSource(
+              lat: resolved!.lat,
+              lng: resolved!.lng,
+              appetites: appetites,
+              radiusKm: overpassRadius,
+            ),
+            PhotonPlaceSource(
+              lat: resolved!.lat,
+              lng: resolved!.lng,
+              queries: _photonQueriesFor(appetites),
+              radiusKm: searchRadius > 200 ? 200.0 : searchRadius,
+            ),
+            WikipediaPlaceSource(
+              lat: resolved!.lat,
+              lng: resolved!.lng,
+              radiusKm: searchRadius > 10 ? 10 : searchRadius,
+            ),
+          ],
+          routeSources: [
+            OverpassRouteSource(
+              lat: resolved!.lat,
+              lng: resolved!.lng,
+              radiusKm: overpassRadius + 15,
+            ),
+            KomootRouteSource(
+              lat: resolved!.lat,
+              lng: resolved!.lng,
+              radiusKm: searchRadius > 50 ? 50.0 : searchRadius,
+              sport: 'hike',
+            ),
+          ],
+          perSourceTimeout: const Duration(seconds: 8),
+          maxRetries: 1,
+        );
+        final sourceResult = await engine.discover();
+        var realPlaces = _mergePlaces([sourceResult.places]);
+        final allRoutes = _mergeRoutes([sourceResult.routes]);
+        final sourcesResponded = [...sourceResult.sourcesResponded];
+        final sourcesFailed = {...sourceResult.sourcesFailed};
+
+        for (final entry in sourcesFailed.entries) {
+          debugPrint('[PlanDiscovery] ${entry.key}: ${entry.value}');
+        }
+
+        // Overpass limita la consulta de lugares a 30 km. Solo se amplía
+        // cuando la primera búsqueda usó un radio menor: evita repetir la
+        // misma consulta cuando el radio efectivo ya era de 30 km o más.
+        if (realPlaces.length < 5 && overpassRadius < 30) {
           if (mounted) {
-            setState(() => _stage = 'Pocos sitios cerca: ampliando el radio…');
+            setState(() => _stage = 'Pocos sitios: ampliando la búsqueda local…');
           }
-          final wide = await OverpassPlaceSource(
-            lat: resolved.lat,
-            lng: resolved.lng,
-            appetites: appetites,
-            radiusKm: 35,
-          ).fetchAll().timeout(const Duration(seconds: 8), onTimeout: () => <Place>[]);
-          realPlaces = _mergePlaces([
-            overpassPlaces,
-            wide,
-            wikiPlaces,
-            photonPlaces,
-            newsPlaces,
-          ]);
-        }
-        // Si aún hay pocos o ningún sitio real, genera planes locales
-        // basados en tu pueblo (no en Madrid).
-        if (realPlaces.length < 3) {
-          if (mounted) {
-            setState(() => _stage = 'Generando planes locales para $_geoLabel…');
+          try {
+            final wide = await OverpassPlaceSource(
+              lat: resolved!.lat,
+              lng: resolved!.lng,
+              appetites: appetites,
+              radiusKm: 30,
+            ).fetchAll().timeout(const Duration(seconds: 5));
+            realPlaces = _mergePlaces([realPlaces, wide]);
+            sourcesResponded.add('OverpassPlaceSource (radio ampliado)');
+          } catch (error) {
+            sourcesFailed['OverpassPlaceSource (radio ampliado)'] =
+                error.toString();
+            debugPrint('[PlanDiscovery] OverpassPlaceSource (radio ampliado): $error');
           }
-          final local = await LocalFallbackSource(
-            lat: resolved.lat,
-            lng: resolved.lng,
-            locationLabel: resolved.label,
-            appetites: appetites,
-            radiusKm: searchRadius,
-          ).fetchAll().timeout(const Duration(seconds: 3), onTimeout: () => <Place>[]);
-          realPlaces = _mergePlaces([realPlaces, local]);
         }
-        // Curadas SOLO si están cerca de ti (antes colaba la Ruta del
-        // Cares en cualquier parte). Sin centro, fuera.
-        // Tope honesto: nada más lejos si hay cerca.
+
         maxDistance = searchRadius + 15;
-        final curatedNear = CuratedRoutes.all.where((r) {
-          if (r.centerLat == null || r.centerLng == null) return false;
-          final d = LocationService.distanceKm(
-            resolved.lat,
-            resolved.lng,
-            r.centerLat!,
-            r.centerLng!,
+        final curatedNear = CuratedRoutes.all.where((route) {
+          if (route.centerLat == null || route.centerLng == null) return false;
+          final distance = LocationService.distanceKm(
+            resolved!.lat,
+            resolved!.lng,
+            route.centerLat!,
+            route.centerLng!,
           );
-          return d != null && d <= searchRadius + 40;
+          return distance != null && distance <= searchRadius + 40;
         }).take(3).toList();
+        if (curatedNear.isNotEmpty) sourcesResponded.add('curated_routes');
+
         final routes = [...allRoutes, ...curatedNear];
         discovered = DiscoveryResult(
           places: realPlaces,
           routes: routes,
-          // Sin actividades mock de Madrid con ubicación real.
           activities: const [],
+          sourcesResponded: sourcesResponded,
+          sourcesFailed: sourcesFailed,
         );
+
         if (realPlaces.isEmpty && routes.isEmpty) {
-          // No hay datos reales: mostramos estado vacío honesto sin inventar
-          // lugares de Madrid ni de ningún otro sitio.
-          discovered = const DiscoveryResult(
-            places: [],
-            routes: [],
-            activities: [],
-            sourcesResponded: [],
-            sourcesFailed: {},
+          _setStatus(
+            'No se encontraron lugares ni rutas verificables cerca de ${_geoLabel ?? placeText}. '
+            'Comprueba la conexión o amplía el radio de búsqueda.',
+            isError: true,
           );
-          if (mounted) {
-            _setStatus(
-              'No se encontraron sitios reales cerca de ${_geoLabel ?? placeText}. '
-              'Revisa tu conexión o prueba a ampliar el radio de búsqueda.',
-              isError: true,
-            );
-          }
         } else {
           if (mounted) {
             setState(() => _stage = 'Calculando costes, tiempos y distancias…');
           }
-          if (mounted && realPlaces.isEmpty) {
+          if (sourcesFailed.isNotEmpty) {
             _setStatus(
-              'Aquí hay pocos bares/museos en el mapa: te muestro rutas cercanas.',
+              'Algunas fuentes no respondieron (${sourcesFailed.keys.join(', ')}). '
+              'Se conservan los resultados que sí llegaron.',
             );
+          } else if (realPlaces.isEmpty) {
+            _setStatus('Hay pocas fichas de lugares en los mapas; se muestran rutas verificadas.');
           }
         }
       } else {
-        // Sin coordenadas precisas: no inventamos coordenadas de Madrid.
-        // Generamos ideas generales basadas en el texto escrito, marcadas
-        // claramente como sugerencias sin ubicación real.
-        final hasCoords = _lat != null && _lng != null;
-        final local = await LocalFallbackSource(
-          lat: _lat ?? 0.0,
-          lng: _lng ?? 0.0,
-          locationLabel: _placeController.text.trim().isNotEmpty
-              ? _placeController.text.trim()
-              : 'tu localidad',
-          appetites: intent.appetites.isEmpty
-              ? {Appetite.fiesta}
-              : intent.appetites,
-          radiusKm: searchRadius,
-        ).fetchAll();
-        // Marcar cada lugar local como idea genérica, no lugar verificado.
-        final localIdeas = local.map((p) => Place(
-          id: p.id,
-          type: p.type,
-          title: '${p.title} (idea general)',
-          description: '${p.description}\nNota: es una sugerencia general sin ubicación verificada.',
-          address: p.address,
-          location: p.location,
-          price: p.price,
-          pricePerPerson: p.pricePerPerson,
-          openingHours: p.openingHours,
-          rating: p.rating,
-          reviewCount: p.reviewCount,
-          durationMinutes: p.durationMinutes,
-          difficulty: p.difficulty,
-          tags: p.tags,
-          source: 'local_fallback_idea',
-          sourceUrl: p.sourceUrl,
-          verifiedAt: p.verifiedAt,
-          confidence: 0.3,
-          photoUrl: p.photoUrl,
-          placeName: p.placeName,
-          needsBooking: p.needsBooking,
-          indoor: p.indoor,
-          outdoorOnly: p.outdoorOnly,
-        ));
-        discovered = DiscoveryResult(
-          places: localIdeas.toList(),
-          routes: const [],
-          activities: const [],
+        // Sin coordenadas válidas no se hacen consultas geográficas ni se
+        // convierten ideas inventadas en lugares cercanos.
+        discovered = const DiscoveryResult();
+        _setStatus(
+          'No se pudo verificar tu ubicación. Selecciona tu localidad en las sugerencias o activa el GPS para buscar lugares reales.',
+          isError: true,
         );
-        if (mounted) {
-          _setStatus(
-            hasCoords
-                ? 'Usando "${_placeController.text.trim()}" como referencia (sin coordenadas precisas).'
-                : 'Sin coordenadas GPS: muestra solo ideas generales para "${_placeController.text.trim()}".',
-            isError: !hasCoords,
-          );
-        }
       }
       if (!mounted) return;
       final seenIds = await _loadSeenIds();
@@ -1048,12 +983,18 @@ class _PlanCreatorV2ScreenState extends State<PlanCreatorV2Screen> {
         _drag = Offset.zero;
         _showResults = true;
         if (_results.isEmpty) {
-          final failed = discovered.sourcesFailed.isNotEmpty
-              ? discovered.sourcesFailed.keys.join(', ')
-              : 'todas las fuentes';
-          _error = 'No se encontraron planes reales con esas respuestas. '
-              'Fuentes sin respuesta: $failed. '
-              'Prueba a ampliar el radio de búsqueda o revisa tu conexión.';
+          if (!hasGeo) {
+            _error = 'No se puede buscar por cercanía sin una ubicación verificada. '
+                'Selecciona tu localidad o activa el GPS y vuelve a intentarlo.';
+          } else if (discovered.sourcesFailed.isNotEmpty) {
+            final failed = discovered.sourcesFailed.keys.join(', ');
+            _error = 'No se encontraron planes con los datos disponibles. '
+                'Fuentes con error: $failed. '
+                'Prueba a ampliar el radio o revisa tu conexión.';
+          } else {
+            _error = 'Las fuentes consultadas no devolvieron lugares ni rutas verificables. '
+                'Prueba a ampliar el radio de búsqueda.';
+          }
         }
       });
       // Acumula mostrados para que "ver otros" rote sin repetir.
