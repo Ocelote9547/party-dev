@@ -1,0 +1,4 @@
+# Carpeta para caras base por imagen (fotos IA de avatares).
+# Formato esperado: PNG cuadrado 512x512, fondo transparente, vista frontal.
+# Nombres: custom_01.png ... custom_12.png (ver assets/avatars/README.md).
+# Este .gitkeep mantiene la carpeta en git; los PNG los añade el usuario.
