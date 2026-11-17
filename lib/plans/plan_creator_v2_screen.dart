@@ -732,8 +732,8 @@ class _PlanCreatorV2ScreenState extends State<PlanCreatorV2Screen> {
         return;
       }
       final hasGeo = resolved != null &&
-          _hasUsableCoordinates(resolved.lat, resolved.lng);
-      _lastSearchLabel = hasGeo ? resolved.label : placeText;
+          _hasUsableCoordinates(resolved!.lat, resolved!.lng);
+      _lastSearchLabel = hasGeo ? resolved!.label : placeText;
       double? maxDistance;
 
       // ---- Tiempo previsto y pronóstico ----
@@ -756,7 +756,7 @@ class _PlanCreatorV2ScreenState extends State<PlanCreatorV2Screen> {
       WeatherHour? weather;
       if (hasGeo) {
         try {
-          weather = await _weather.at(resolved.lat, resolved.lng, plannedStart)
+          weather = await _weather.at(resolved!.lat, resolved!.lng, plannedStart)
               .timeout(const Duration(seconds: 5));
         } catch (_) {
           weather = null;
@@ -782,22 +782,22 @@ class _PlanCreatorV2ScreenState extends State<PlanCreatorV2Screen> {
           timeSlot: intent.timeSlot,
           budgetMinPerPerson: intent.budgetMinPerPerson,
           budgetMaxPerPerson: intent.budgetMaxPerPerson,
-          locationLabel: resolved.label,
-          lat: resolved.lat,
-          lng: resolved.lng,
+          locationLabel: resolved!.label,
+          lat: resolved!.lat,
+          lng: resolved!.lng,
           moveMode: intent.moveMode,
           timeOfDay: intent.timeOfDay,
           planDate: intent.planDate,
         );
         if (mounted) {
           setState(() {
-            _geoLabel = resolved.label;
-            _stage = 'Buscando sitios reales cerca de ${resolved.label}…';
+            _geoLabel = resolved!.label;
+            _stage = 'Buscando sitios reales cerca de ${resolved!.label}…';
           });
         }
       } else {
         if (mounted) {
-          setState(() => _stage = 'Sin ubicación exacta: usando ideas generales…');
+          setState(() => _stage = 'Sin ubicación verificada: búsqueda geográfica desactivada…');
         }
       }
 
@@ -821,38 +821,38 @@ class _PlanCreatorV2ScreenState extends State<PlanCreatorV2Screen> {
         final engine = DiscoveryEngine.fromSources(
           placeSources: [
             OverpassPlaceSource(
-              lat: resolved.lat,
-              lng: resolved.lng,
+              lat: resolved!.lat,
+              lng: resolved!.lng,
               appetites: appetites,
               radiusKm: overpassRadius,
             ),
             PhotonPlaceSource(
-              lat: resolved.lat,
-              lng: resolved.lng,
+              lat: resolved!.lat,
+              lng: resolved!.lng,
               queries: _photonQueriesFor(appetites),
               radiusKm: searchRadius > 200 ? 200.0 : searchRadius,
             ),
             WikipediaPlaceSource(
-              lat: resolved.lat,
-              lng: resolved.lng,
+              lat: resolved!.lat,
+              lng: resolved!.lng,
               radiusKm: searchRadius > 10 ? 10 : searchRadius,
             ),
             NewsEventsSource(
-              lat: resolved.lat,
-              lng: resolved.lng,
+              lat: resolved!.lat,
+              lng: resolved!.lng,
               radiusKm: searchRadius,
-              locationLabel: resolved.label,
+              locationLabel: resolved!.label,
             ),
           ],
           routeSources: [
             OverpassRouteSource(
-              lat: resolved.lat,
-              lng: resolved.lng,
+              lat: resolved!.lat,
+              lng: resolved!.lng,
               radiusKm: overpassRadius + 15,
             ),
             KomootRouteSource(
-              lat: resolved.lat,
-              lng: resolved.lng,
+              lat: resolved!.lat,
+              lng: resolved!.lng,
               radiusKm: searchRadius > 50 ? 50.0 : searchRadius,
               sport: 'hike',
             ),
@@ -879,8 +879,8 @@ class _PlanCreatorV2ScreenState extends State<PlanCreatorV2Screen> {
           }
           try {
             final wide = await OverpassPlaceSource(
-              lat: resolved.lat,
-              lng: resolved.lng,
+              lat: resolved!.lat,
+              lng: resolved!.lng,
               appetites: appetites,
               radiusKm: 30,
             ).fetchAll().timeout(const Duration(seconds: 5));
@@ -897,8 +897,8 @@ class _PlanCreatorV2ScreenState extends State<PlanCreatorV2Screen> {
         final curatedNear = CuratedRoutes.all.where((route) {
           if (route.centerLat == null || route.centerLng == null) return false;
           final distance = LocationService.distanceKm(
-            resolved.lat,
-            resolved.lng,
+            resolved!.lat,
+            resolved!.lng,
             route.centerLat!,
             route.centerLng!,
           );
@@ -925,7 +925,12 @@ class _PlanCreatorV2ScreenState extends State<PlanCreatorV2Screen> {
           if (mounted) {
             setState(() => _stage = 'Calculando costes, tiempos y distancias…');
           }
-          if (realPlaces.isEmpty) {
+          if (sourcesFailed.isNotEmpty) {
+            _setStatus(
+              'Algunas fuentes no respondieron (${sourcesFailed.keys.join(', ')}). '
+              'Se conservan los resultados que sí llegaron.',
+            );
+          } else if (realPlaces.isEmpty) {
             _setStatus('Hay pocas fichas de lugares en los mapas; se muestran rutas verificadas.');
           }
         }
