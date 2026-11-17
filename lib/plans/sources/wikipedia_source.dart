@@ -9,8 +9,8 @@ import 'data_source.dart';
 ///
 /// Cubre lo que OSM a veces no tiene como POI visitable: castillos,
 /// lagunas, ermitas, iglesias, museos o yacimientos (p. ej. Laguna de
-/// Zóñar, Castillo Anzur). Radio máximo del API: 10 km. Si falla,
-/// devuelve lista vacía. Nunca lanza.
+/// Zóñar, Castillo Anzur). Radio máximo del API: 10 km. Los errores de
+/// consulta se propagan para que DiscoveryEngine los registre.
 class WikipediaPlaceSource implements PlaceSource {
   final double lat;
   final double lng;
