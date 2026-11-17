@@ -144,24 +144,38 @@ class OverpassPlaceSource implements PlaceSource {
   }
 
   Future<http.Response> _post(String query) async {
-    Exception? last;
-    for (final ep in _endpoints) {
+    final clock = Stopwatch()..start();
+    final perEndpointBudget =
+        Duration(microseconds: timeout.inMicroseconds ~/ _endpoints.length);
+    Object? lastError;
+
+    for (final endpoint in _endpoints) {
+      final remaining = timeout - clock.elapsed;
+      if (remaining.inMicroseconds <= 0) break;
+      final attemptTimeout = remaining.compareTo(perEndpointBudget) < 0
+          ? remaining
+          : perEndpointBudget;
       try {
-        final res = await _client
+        final response = await _client
             .post(
-              Uri.parse(ep),
-              headers: {
+              Uri.parse(endpoint),
+              headers: const {
                 'Content-Type': 'application/x-www-form-urlencoded',
               },
               body: {'data': query},
             )
-            .timeout(timeout);
-        if (res.statusCode == 200) return res;
-      } catch (e) {
-        last = e is Exception ? e : Exception('$e');
+            .timeout(attemptTimeout);
+        if (response.statusCode == 200) return response;
+        lastError = StateError('HTTP ${response.statusCode} en $endpoint');
+      } catch (error) {
+        lastError = error;
       }
     }
-    throw last ?? Exception('overpass sin respuesta');
+
+    throw StateError(
+      'Overpass ${label}: tiempo agotado o mirrors no disponibles'
+      '${lastError == null ? '' : ' ($lastError)'}',
+    );
   }
 
   @override
@@ -169,9 +183,13 @@ class OverpassPlaceSource implements PlaceSource {
     try {
       final res = await _post(_buildQuery());
       final decoded = jsonDecode(res.body);
-      if (decoded is! Map<String, dynamic>) return const [];
+      if (decoded is! Map<String, dynamic>) {
+        throw const FormatException('Respuesta JSON de Overpass no válida');
+      }
       final elements = decoded['elements'];
-      if (elements is! List) return const [];
+      if (elements is! List) {
+        throw const FormatException('Overpass no devolvió una lista de elementos');
+      }
       final places = <Place>[];
       final seen = <String>{};
       for (final el in elements) {
@@ -221,8 +239,8 @@ class OverpassPlaceSource implements PlaceSource {
         if (places.length >= 20) break;
       }
       return places;
-    } catch (_) {
-      return const [];
+    } catch (error) {
+      throw StateError('Error consultando Overpass (${label}): $error');
     }
   }
 
