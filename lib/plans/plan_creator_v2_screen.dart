@@ -17,7 +17,6 @@ import 'services/saved_plans_service.dart';
 import 'services/weather_service.dart';
 import 'sources/curated_routes.dart';
 import 'sources/komoot_source.dart';
-import 'sources/news_events_source.dart';
 import 'sources/overpass_place_source.dart';
 import 'sources/overpass_source.dart';
 import 'sources/photon_source.dart';
@@ -836,12 +835,6 @@ class _PlanCreatorV2ScreenState extends State<PlanCreatorV2Screen> {
               lat: resolved!.lat,
               lng: resolved!.lng,
               radiusKm: searchRadius > 10 ? 10 : searchRadius,
-            ),
-            NewsEventsSource(
-              lat: resolved!.lat,
-              lng: resolved!.lng,
-              radiusKm: searchRadius,
-              locationLabel: resolved!.label,
             ),
           ],
           routeSources: [
