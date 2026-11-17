@@ -38,20 +38,32 @@ class PhotonPlaceSource implements PlaceSource {
   Future<List<Place>> fetchAll() async {
     if (queries.isEmpty) return const [];
     try {
-      // Consultas en paralelo: cada una es rápida (~0.3-1s).
+      // Cada consulta se aísla: una caída parcial no descarta las demás.
       final results = await Future.wait([
-        for (final q in queries.take(9)) _search(q.$1, q.$2),
+        for (final q in queries.take(9)) _safeSearch(q.$1, q.$2),
       ]);
+      final failures = results.where((result) => result.$2 != null).toList();
+      if (failures.length == results.length && failures.isNotEmpty) {
+        throw StateError('Todas las consultas Photon fallaron: ${failures.first.$2}');
+      }
       final places = <Place>[];
       final seen = <String>{};
-      for (final list in results) {
-        for (final p in list) {
-          if (seen.add(_norm(p.title))) places.add(p);
+      for (final result in results) {
+        for (final place in result.$1) {
+          if (seen.add(_norm(place.title))) places.add(place);
         }
       }
       return places;
-    } catch (_) {
-      return const [];
+    } catch (error) {
+      throw StateError('Error consultando Photon: $error');
+    }
+  }
+
+  Future<(List<Place>, Object?)> _safeSearch(String query, String osmTag) async {
+    try {
+      return (await _search(query, osmTag), null);
+    } catch (error) {
+      return (<Place>[], error);
     }
   }
 
@@ -68,7 +80,9 @@ class PhotonPlaceSource implements PlaceSource {
         'User-Agent': 'PARTY-App/1.8.3 (com.n3mesis.party)',
         'Accept': 'application/json',
       }).timeout(timeout);
-      if (res.statusCode != 200) return const [];
+      if (res.statusCode != 200) {
+        throw StateError('Photon HTTP ${res.statusCode}');
+      }
       final decoded = jsonDecode(res.body);
       if (decoded is! Map<String, dynamic>) return const [];
       final features = decoded['features'];
@@ -86,7 +100,7 @@ class PhotonPlaceSource implements PlaceSource {
       }
       return out;
     } catch (_) {
-      return const [];
+      rethrow;
     }
   }
 
