@@ -46,7 +46,9 @@ class KomootRouteSource implements RouteSource {
             '(KHTML, like Gecko) Chrome/120.0 Safari/537.36',
         'Accept': 'application/json',
       }).timeout(timeout);
-      if (res.statusCode != 200) return const [];
+      if (res.statusCode != 200) {
+        throw StateError('Komoot HTTP ${res.statusCode}');
+      }
       final decoded = jsonDecode(res.body);
       if (decoded is! Map<String, dynamic>) return const [];
       final tours = decoded['tours'];
@@ -96,8 +98,8 @@ class KomootRouteSource implements RouteSource {
         if (routes.length >= 15) break;
       }
       return routes;
-    } catch (_) {
-      return const [];
+    } catch (error) {
+      throw StateError('Error consultando Komoot: $error');
     }
   }
 
